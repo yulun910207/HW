@@ -1,1 +1,234 @@
+let balloons = []; // 宣告氣球陣列以儲存畫布上的所有氣球
+let particles = []; // 宣告爆炸粒子陣列以儲存爆破後的粒子
+let bgm, popSfx; // 宣告背景音樂與爆破音效變數
+let lastBurstTime = 0; // 宣告變數記錄上次爆破主循環的時間
+let pendingSecondBurst = false; // 宣告旗標判斷是否等待爆破第二個氣球
+let secondBurstTriggerTime = 0; // 宣告第二個氣球爆破的觸發時間點
+let colorList = ['#af9ad5', '#ff859b', '#dab295', '#adfff5', '#ffffc2', '#f4b8f5', '#b79bbf', '#cda2bf', '#abb4d9', '#d8b897']; // 定義氣球本體顏色清單
+let isAudioPlaying = false; // 宣告音效開關狀態變數（預設關閉，等待點擊按鈕開啟）
+let btnX = 90; // 宣告音效按鈕的 x 座標
+let btnY = 60; // 宣告音效按鈕的 y 座標
+let btnW = 110; // 宣告音效按鈕的寬度（長軸，範圍在 100-120 之間）
+let btnH = 60; // 宣告音效按鈕的高度
 
+function preload() { // 預先載入音效與音樂檔案的函式
+  soundFormats('mp3', 'wav'); // 設定支援的音效格式
+  bgm = loadSound('mixkit-game-level-music-689.mp3'); // 載入背景音樂檔案
+  popSfx = loadSound('balloon-pop-36589.mp3'); // 載入氣球爆破音效檔案
+} // 結束 preload 函式
+
+function setup() { // 設定初始化函式
+  createCanvas(windowWidth, windowHeight); // 建立符合視窗大小的畫布
+  bgm.setVolume(0.7); // 設定背景音樂音量較大聲
+  popSfx.setVolume(0.2); // 設定爆破音效音量較小聲
+
+  for (let i = 0; i < 25; i++) { // 迴圈建立初始的 25 個氣球
+    balloons.push(new Balloon(random(width), random(0, height))); // 在亂數位置建立氣球並加入陣列
+  } // 結束建立氣球的迴圈
+} // 結束 setup 函式
+
+function draw() { // 主繪製循環函式
+  background('#feeac7'); // 設定畫布背景顏色為 #feeac7
+
+  let currentTime = millis() / 1000; // 取得當前程式執行的總秒數
+
+  if (isAudioPlaying) { // 檢查音樂是否應為播放狀態
+    if (!bgm.isPlaying()) { // 若音樂未在播放
+      bgm.loop(); // 循環播放背景音樂
+    } // 結束 bgm 播放檢查
+  } else { // 若音樂為關閉狀態
+    if (bgm.isPlaying()) { // 若音樂正在播放
+      bgm.pause(); // 暫停背景音樂
+    } // 結束 bgm 暫停檢查
+  } // 結束音樂狀態判斷
+
+  if (currentTime - lastBurstTime >= 1.0) { // 每隔 1 秒觸發一次爆破主循環
+    triggerBurst(); // 執行第一個氣球爆破
+    lastBurstTime = currentTime; // 更新上次爆破循環的時間
+    pendingSecondBurst = true; // 設定需要延遲爆破第二個氣球
+    secondBurstTriggerTime = currentTime + 0.35; // 設定 0.35 秒後爆破第二個氣球（錯開時間，不與第一個同時爆破）
+  } // 結束 1 秒計時判斷
+
+  if (pendingSecondBurst && currentTime >= secondBurstTriggerTime) { // 檢查是否到達錯開爆破第二個氣球的時間
+    triggerBurst(); // 執行第二個氣球爆破
+    pendingSecondBurst = false; // 清除等待旗標
+  } // 結束第二個氣球延遲爆破判斷
+
+  for (let i = balloons.length - 1; i >= 0; i--) { // 從後往前迴圈更新與繪製所有氣球
+    balloons[i].update(); // 更新氣球的座標與飄動狀態
+    balloons[i].display(); // 繪製氣球及其綁結、線條與五芒星
+
+    if (balloons[i].isOffScreen()) { // 檢查氣球線條是否完全超過畫布最上方
+      balloons.splice(i, 1); // 若超過則從陣列中移除該氣球
+      balloons.push(new Balloon(random(width), height + random(50, 200))); // 在畫布視窗最下方產生新氣球
+    } // 結束超出畫面判斷
+  } // 結束氣球迴圈
+
+  for (let i = particles.length - 1; i >= 0; i--) { // 從後往前迴圈更新與繪製所有爆炸粒子
+    particles[i].update(); // 更新粒子位置與透明度
+    particles[i].display(); // 繪製爆炸粒子
+    if (particles[i].isFinished()) { // 檢查粒子是否完全透明消失
+      particles.splice(i, 1); // 從陣列中移除已消失的粒子
+    } // 結束粒子消失判斷
+  } // 結束粒子迴圈
+
+  drawAudioButton(); // 繪製音效開關按鈕
+} // 結束 draw 函式
+
+function triggerBurst() { // 自訂執行單顆氣球爆破的函式
+  if (balloons.length > 0) { // 檢查氣球陣列中是否還有氣球
+    let index = floor(random(balloons.length)); // 隨機選取一個氣球的索引值
+    let b = balloons[index]; // 取得被選中的氣球物件
+    let burstX = b.currentX; // 取得該氣球當前的 x 座標
+    let burstY = b.y; // 取得該氣球當前的 y 座標
+    let burstColor = b.color; // 取得該氣球的顏色
+
+    if (isAudioPlaying) { // 檢查音效是否開啟
+      popSfx.play(); // 播放氣球爆破音效（聲音較小聲）
+    } // 結束音效開啟判斷
+
+    for (let p = 0; p < 35; p++) { // 迴圈產生 35 個爆炸粒子
+      particles.push(new Particle(burstX, burstY, burstColor)); // 建立粒子並加入粒子陣列
+    } // 結束粒子產生迴圈
+
+    balloons.splice(index, 1); // 從陣列中移除被爆破的氣球
+    balloons.push(new Balloon(random(width), height + random(50, 200))); // 在視窗最下方產生一個新氣球以維持數量
+  } // 結束氣球數量大於 0 的判斷
+} // 結束 triggerBurst 函式
+
+function drawAudioButton() { // 自訂繪製音效按鈕的函式
+  push(); // 儲存當前繪圖狀態
+  fill('#ff1a34'); // 設定按鈕顏色為 ff1a34
+  noStroke(); // 按鈕不需要框線
+  ellipse(btnX, btnY, btnW, btnH); // 繪製橢圓形按鈕（長軸為 btnW，即 110，符合 100-120 範圍）
+
+  fill(255); // 設定文字顏色為白色
+  textSize(16); // 設定文字大小
+  textAlign(CENTER, CENTER); // 設定文字置中對齊
+  let btnText = isAudioPlaying ? "音效: 開" : "音效: 關"; // 根據目前狀態決定按鈕文字
+  text(btnText, btnX, btnY); // 在按鈕中心繪製文字
+  pop(); // 恢復繪圖狀態
+} // 結束 drawAudioButton 函式
+
+function mousePressed() { // 處理滑鼠點擊事件的函式
+  userStartAudio(); // 啟動 p5.sound 音訊環境
+
+  // 計算滑鼠點擊位置是否在橢圓形按鈕範圍內
+  let d = sq((mouseX - btnX) / (btnW / 2)) + sq((mouseY - btnY) / (btnH / 2));
+  if (d <= 1) { // 若點擊在按鈕內部
+    isAudioPlaying = !isAudioPlaying; // 切換音效開關狀態
+  } // 結束按鈕點擊判斷
+} // 結束 mousePressed 函式
+
+class Balloon { // 定義氣球類別
+  constructor(x, y) { // 氣球類別的建構子
+    this.x = x; // 設定氣球的基準 x 座標
+    this.y = y; // 設定氣球的 y 座標
+    this.w = random(250, 350); // 氣球寬度在 250 到 350 之間亂數產生
+    this.h = this.w * (6 / 4); // 氣球高度根據 4:6 的長寬高比計算
+    this.color = color(random(colorList)); // 亂數選取氣球本體顏色
+    this.color.setAlpha(125); // 設定氣球本體透明度為 125
+    this.speed = random(1, 2.5); // 設定氣球往上飄動的速率（不固定）
+    this.swaySpeed = random(0.015, 0.04); // 設定左右輕微飄動的速度
+    this.swayAmount = random(15, 30); // 設定左右飄動的幅度
+    this.stringLength = random(100, 160); // 設定下方飄動線條的長度
+    this.phase = random(0, TWO_PI); // 設定相位亂數以使每個氣球飄動節奏不同
+    this.currentX = this.x; // 初始化當前 x 座標
+  } // 結束建構子
+
+  update() { // 更新氣球狀態的函式
+    this.y -= this.speed; // 氣球根據自身速率往上飄動
+    this.phase += this.swaySpeed; // 更新左右飄動的相位角
+    this.currentX = this.x + sin(this.phase) * this.swayAmount; // 計算帶有左右輕微飄動效果的 x 座標
+  } // 結束 update 函式
+
+  display() { // 繪製氣球的函式
+    push(); // 儲存當前的繪圖狀態
+    translate(this.currentX, this.y); // 平移座標原點到氣球的當前中心位置
+
+    fill(this.color); // 設定綁結的填滿顏色與氣球本體相同
+    noStroke(); // 不需要任何框線
+    triangle(-10, this.h / 2, 10, this.h / 2, 0, this.h / 2 + 15); // 在氣球下方繪製一個三角形綁結
+
+    noFill(); // 飄動的線條不需要填滿顏色
+    stroke(this.color); // 設定線條顏色與氣球相同
+    strokeWeight(2); // 設定線條粗細
+    beginShape(); // 開始繪製曲線線條
+    vertex(0, this.h / 2 + 15); // 線條起點接在綁結下方
+    bezierVertex( // 使用貝茲曲線產生飄動感
+      sin(this.phase) * 25, this.h / 2 + 45, // 控制點 1
+      -sin(this.phase) * 25, this.h / 2 + 95, // 控制點 2
+      sin(this.phase) * 12, this.h / 2 + this.stringLength // 終點位置
+    ); // 結束貝茲曲線定義
+    endShape(); // 結束繪製線條
+
+    noStroke(); // 取消氣球本體的框線
+    fill(this.color); // 設定氣球本體的填滿顏色與透明度
+    ellipse(0, 0, this.w, this.h); // 繪製橢圓形的氣球本體
+
+    fill('#ffc107'); // 設定五芒星的填滿顏色為 #ffc107
+    noStroke(); // 五芒星不需要框線
+    drawStar(this.w * 0.22, -this.h * 0.25, 45 / 2, 45 / 4, 5); // 在氣球內右上角繪製直徑 45 的五芒星
+
+    pop(); // 恢復原有的繪圖狀態
+  } // 結束 display 函式
+
+  isOffScreen() { // 檢查氣球是否完全離開畫布上方的函式
+    let stringBottomY = this.y + this.h / 2 + this.stringLength; // 計算線條最尾端的 y 座標
+    return stringBottomY < 0; // 若線條尾端小於 0（完全超過畫布最上方）則回傳 true
+  } // 結束 isOffScreen 函式
+} // 結束 Balloon 類別
+
+class Particle { // 定義爆炸粒子類別
+  constructor(x, y, col) { // 粒子類別的建構子
+    this.x = x; // 設定粒子初始 x 座標
+    this.y = y; // 設定粒子初始 y 座標
+    let angle = random(TWO_PI); // 亂數產生爆炸擴散的角度
+    let speed = random(2, 9); // 亂數產生爆炸擴散的速度
+    this.vx = cos(angle) * speed; // 計算 x 方向的速度分量
+    this.vy = sin(angle) * speed; // 計算 y 方向的速度分量
+    this.alpha = 255; // 設定粒子初始透明度為 255
+    this.color = color(col); // 設定粒子的顏色
+    this.size = random(6, 14); // 亂數產生粒子的大小
+  } // 結束建構子
+
+  update() { // 更新粒子狀態的函式
+    this.x += this.vx; // 根據速度更新粒子 x 座標
+    this.y += this.vy; // 根據速度更新粒子 y 座標
+    this.vy += 0.15; // 加上微弱的重力加速度讓粒子自然下墜
+    this.alpha -= 6; // 逐漸遞減透明度使粒子淡出
+  } // 結束 update 函式
+
+  display() { // 繪製粒子的函式
+    push(); // 儲存當前繪圖狀態
+    noStroke(); // 粒子不需要框線
+    let c = color(this.color); // 複製粒子顏色
+    c.setAlpha(this.alpha); // 設定當前透明度
+    fill(c); // 套用顏色與透明度
+    ellipse(this.x, this.y, this.size); // 繪製粒子圓形
+    pop(); // 恢復繪圖狀態
+  } // 結束 display 函式
+
+  isFinished() { // 檢查粒子是否完全消失的函式
+    return this.alpha <= 0; // 若透明度小於等於 0 則回傳 true
+  } // 結束 isFinished 函式
+} // 結束 Particle 類別
+
+function drawStar(x, y, radius1, radius2, npoints) { // 自訂繪製五芒星的函式
+  let angle = TWO_PI / npoints; // 計算每個頂點的角度間距
+  let halfAngle = angle / 2.0; // 計算半角位置
+  beginShape(); // 開始繪製多邊形
+  for (let a = 0; a < TWO_PI; a += angle) { // 迴圈計算五芒星的所有頂點
+    let sx = x + cos(a) * radius1; // 計算外圈頂點 x 座標
+    let sy = y + sin(a) * radius1; // 計算外圈頂點 y 座標
+    vertex(sx, sy); // 加入外圈頂點
+    sx = x + cos(a + halfAngle) * radius2; // 計算內圈頂點 x 座標
+    sy = y + sin(a + halfAngle) * radius2; // 計算內圈頂點 y 座標
+    vertex(sx, sy); // 加入內圈頂點
+  } // 結束迴圈
+  endShape(CLOSE); // 結束繪製並閉合圖形
+} // 結束 drawStar 函式
+
+function windowResized() { // 當視窗大小改變時觸發的函式
+  resizeCanvas(windowWidth, windowHeight); // 自動調整畫布大小符合新視窗
+} // 結束 windowResized 函式
